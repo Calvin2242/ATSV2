@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <section class="card">
+        <div class="list-row" style="padding-top:0">
+          <div><h2 id="title"></h2></div>
+          <div class="actions"><button class="btn sm" id="allBtn" type="button">Mark all present</button><button class="btn sm ghost" id="noneBtn" type="button">Clear all</button></div>
+        </div>
+        <div class="mhead att"><span>Student</span><span>Present</span><span>Left early</span><span>Reason</span></div>
+        <div id="rows"></div>
+      </section>
+      <div class="stickybar">
+        <div class="grow"><span id="count"></span><div class="bar"><i id="barFill" style="width:0"></i></div></div>
+        <a class="btn" href="viewAttendance.html">Back</a>
+        <button class="btn primary" id="save">Save attendance</button>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { requireAuth, mountShell, store, toast, notFound, esc, param, $ } from "./app.js";
+
+await requireAuth();
+mountShell("attendance", "Attendance");
+const rec = await store.get("attendance", param("id"));
+if (!rec || rec.isPublicHoliday) await notFound("Attendance record not found.", "viewAttendance.html");
+
+$("#title").textContent = `${rec.className} - ${rec.date}`;
+let dirty = false;
+
+function summary() {
+  const p = rec.students.filter(s => s.present).length, t = rec.students.length;
+  $("#count").textContent = `${p} of ${t} present`;
+  $("#barFill").style.width = (t ? p / t * 100 : 0) + "%";
+}
+function render() {
+  $("#rows").innerHTML = rec.students.length ? rec.students.map((s, i) => `
+    <div class="mrow att ${s.present ? "is-on" : ""}" data-i="${i}">
+      <span class="name">${esc(s.name)}</span>
+      <label class="tog"><input type="checkbox" data-f="present" ${s.present ? "checked" : ""} aria-label="Present: ${esc(s.name)}"><span class="n">Absent</span><span class="y">Present</span></label>
+      <label class="tog warn"><input type="checkbox" data-f="leftEarly" ${s.leftEarly ? "checked" : ""} aria-label="Left early: ${esc(s.name)}"><span class="n">Stayed</span><span class="y">Left early</span></label>
+      <input type="text" class="full" data-f="reason" value="${esc(s.reason || "")}" placeholder="Reason (optional)" aria-label="Reason for ${esc(s.name)}">
+    </div>`).join("") : `<div class="empty">This class has no students.</div>`;
+  summary();
+}
+$("#rows").addEventListener("input", e => {
+  const row = e.target.closest("[data-i]"); if (!row) return;
+  const s = rec.students[+row.dataset.i], f = e.target.dataset.f;
+  if (f === "present") { s.present = e.target.checked; row.classList.toggle("is-on", s.present); summary(); }
+  else if (f === "leftEarly") s.leftEarly = e.target.checked;
+  else s.reason = e.target.value;
+  dirty = true;
+});
+$("#allBtn").onclick = () => { rec.students.forEach(s => s.present = true); dirty = true; render(); };
+$("#noneBtn").onclick = () => { rec.students.forEach(s => s.present = false); dirty = true; render(); };
+$("#save").onclick = async () => {
+  const b = $("#save"); b.disabled = true;
+  try { await store.save("attendance", rec); dirty = false; toast("Attendance saved."); }
+  catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); }
+  b.disabled = false;
+};
+addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+render();
+</script>
+</body>
+</html>

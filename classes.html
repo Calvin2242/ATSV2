@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classes</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <div class="cols">
+        <section class="card">
+          <div><h2>Create a class</h2><p class="sub">Add the students in one go from a CSV file, or type their names.</p></div>
+          <label class="field"><span>Class name</span><input type="text" id="newClassName" placeholder="e.g. 2 Mutiara"></label>
+          <div class="seg" role="group" aria-label="Student list source">
+            <button type="button" class="on" data-m="file">Upload CSV</button><button type="button" data-m="manual">Type names</button>
+          </div>
+          <div id="fileBox" class="field"><span>CSV file (first row is the header)</span>
+            <input type="file" id="studentFile" accept=".csv">
+            <div><button class="btn sm" id="sample" type="button">Download CSV sample</button></div>
+          </div>
+          <label id="manualBox" class="field" hidden><span>Student names, one per line</span><textarea id="manualList" rows="6" placeholder="Ali&#10;Aisyah&#10;Daniel"></textarea></label>
+          <button class="btn primary" id="create">Create class</button>
+        </section>
+        <section class="card">
+          <div><h2>Your classes</h2></div>
+          <div id="classList"></div>
+        </section>
+      </div>
+    </main>
+  </div>
+</div>
+
+<dialog id="editDlg">
+  <h3>Edit class</h3>
+  <label class="field"><span>Class name</span><input type="text" id="editName"></label>
+  <h3 style="font-size:16px;margin-top:16px">Students (<span id="editCount">0</span>)</h3>
+  <div class="scroll-list" id="editStudents"></div>
+  <label class="field"><span>Add more students, one per line</span><textarea id="addMore" rows="3" placeholder="Paste names here"></textarea></label>
+  <div class="inline" style="margin-top:8px"><button class="btn sm" id="addBtn" type="button">Add to list</button></div>
+  <div class="dlg-actions"><button class="btn ghost" id="editCancel" type="button">Cancel</button><button class="btn primary" id="editSave" type="button">Save changes</button></div>
+</dialog>
+
+<script type="module">
+import { requireAuth, mountShell, store, toast, confirmBox, esc, uid, $, $$ } from "./app.js";
+
+await requireAuth();
+mountShell("classes", "Classes");
+
+let classes = [];
+async function load() { classes = (await store.list("classes")).sort((a, b) => a.name.localeCompare(b.name)); renderList(); }
+
+function renderList() {
+  $("#classList").innerHTML = classes.length ? classes.map(c => `
+    <div class="list-row"><div><strong>${esc(c.name)}</strong><div class="muted small">${c.students.length} students</div></div>
+    <div class="actions"><button class="btn sm" data-edit="${c.id}">Edit</button><button class="btn sm danger" data-del="${c.id}">Delete</button></div></div>`).join("")
+    : `<div class="empty">No classes yet. Create your first one to get started.</div>`;
+}
+$("#classList").addEventListener("click", async e => {
+  const ed = e.target.closest("[data-edit]"), del = e.target.closest("[data-del]");
+  if (ed) openEdit(ed.dataset.edit);
+  if (del) {
+    const c = classes.find(x => x.id === del.dataset.del);
+    if (!await confirmBox({ title: `Delete ${c.name}?`, text: "Existing assignments and registers for this class are kept.", ok: "Delete class", danger: true })) return;
+    try { await store.remove("classes", c.id); toast("Class deleted."); load(); } catch { toast("Couldn't delete. Try again.", "err"); }
+  }
+});
+
+/* ----- create ----- */
+let mode = "file";
+$$(".seg button").forEach(b => b.onclick = () => {
+  mode = b.dataset.m;
+  $$(".seg button").forEach(x => x.classList.toggle("on", x === b));
+  $("#fileBox").hidden = mode !== "file"; $("#manualBox").hidden = mode !== "manual";
+});
+$("#sample").onclick = () => {
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob(["name\nAli\nAisyah\nDaniel"], { type: "text/csv" }));
+  a.download = "student_list_sample.csv"; a.click();
+};
+const parseNames = (text, skipHeader) => {
+  let lines = text.split(/\r?\n/); if (skipHeader) lines = lines.slice(1);
+  return lines.map(l => l.trim().replace(/^"|"$/g, "").trim()).filter(Boolean);
+};
+$("#create").onclick = async () => {
+  const name = $("#newClassName").value.trim();
+  if (!name) return toast("Enter a class name.", "err");
+  let students;
+  if (mode === "file") {
+    const f = $("#studentFile").files[0];
+    if (!f) return toast("Choose a CSV file with your students.", "err");
+    students = parseNames(await f.text(), true);
+  } else students = parseNames($("#manualList").value, false);
+  if (!students.length) return toast("No student names found.", "err");
+  try {
+    await store.save("classes", { id: uid("c"), name, students });
+    toast("Class created.");
+    $("#newClassName").value = ""; $("#manualList").value = ""; $("#studentFile").value = "";
+    load();
+  } catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); }
+};
+
+/* ----- edit ----- */
+let editing = null;
+function renderEditStudents() {
+  $("#editCount").textContent = editing.students.length;
+  $("#editStudents").innerHTML = editing.students.length
+    ? editing.students.map((s, i) => `<div class="list-row" style="padding:6px 0"><span>${esc(s)}</span><button class="btn sm danger" data-rm="${i}">Remove</button></div>`).join("")
+    : `<div class="empty" style="padding:12px">No students in this class.</div>`;
+}
+function openEdit(id) {
+  const c = classes.find(x => x.id === id);
+  editing = { id: c.id, name: c.name, students: [...c.students] };
+  $("#editName").value = c.name; $("#addMore").value = "";
+  renderEditStudents(); $("#editDlg").showModal();
+}
+$("#editStudents").addEventListener("click", e => {
+  const b = e.target.closest("[data-rm]"); if (!b) return;
+  editing.students.splice(+b.dataset.rm, 1); renderEditStudents();
+});
+$("#addBtn").onclick = () => {
+  const names = parseNames($("#addMore").value, false); if (!names.length) return;
+  editing.students.push(...names); $("#addMore").value = ""; renderEditStudents();
+};
+$("#editCancel").onclick = () => $("#editDlg").close();
+$("#editSave").onclick = async () => {
+  const name = $("#editName").value.trim();
+  if (!name) return toast("Class name can't be empty.", "err");
+  try { await store.save("classes", { id: editing.id, name, students: editing.students }); $("#editDlg").close(); toast("Changes saved."); load(); }
+  catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); }
+};
+
+load();
+</script>
+</body>
+</html>

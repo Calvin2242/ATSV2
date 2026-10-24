@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assignments</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <section class="card">
+        <div class="inline" style="margin-bottom:12px">
+          <input type="search" id="search" placeholder="Search by class, subject or assignment…" aria-label="Search assignments">
+          <a class="btn primary" href="index.html">New assignment</a>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Class</th><th>Subject</th><th>Assignment</th><th>Progress</th><th>Actions</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { requireAuth, mountShell, store, toast, confirmBox, esc, $ } from "./app.js";
+
+await requireAuth();
+mountShell("assignments", "Assignments");
+
+let all = (await store.list("assignments")).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || b.id.localeCompare(a.id));
+
+function render() {
+  const q = $("#search").value.trim().toLowerCase();
+  const list = all.filter(a => [a.title, a.className, a.subject].some(v => (v || "").toLowerCase().includes(q)));
+  $("#rows").innerHTML = list.length ? list.map(a => {
+    const s = a.students.filter(x => x.submitted).length, t = a.students.length, p = t ? Math.round(s / t * 100) : 0;
+    return `<tr><td>${esc(a.className)}</td><td>${esc(a.subject)}</td>
+      <td><strong>${esc(a.title)}</strong><div class="muted small">${esc(a.dateCreated)}</div></td>
+      <td><div class="prog"><span>${s}/${t} (${p}%)</span><div class="bar"><i style="width:${p}%"></i></div></div></td>
+      <td><div class="actions"><a class="btn sm" href="assignment.html?id=${a.id}">Edit</a><a class="btn sm" href="report.html?id=${a.id}">Report</a><button class="btn sm danger" data-del="${a.id}">Delete</button></div></td></tr>`;
+  }).join("") : `<tr><td colspan="5"><div class="empty">${all.length ? "No assignments match your search." : "No assignments yet."}${all.length ? "" : `<br><a class="btn primary" href="index.html">Create an assignment</a>`}</div></td></tr>`;
+}
+$("#search").addEventListener("input", render);
+$("#rows").addEventListener("click", async e => {
+  const b = e.target.closest("[data-del]"); if (!b) return;
+  const a = all.find(x => x.id === b.dataset.del);
+  if (!await confirmBox({ title: "Delete this assignment?", text: `“${a.title}” for ${a.className} and its submission records will be removed.`, ok: "Delete assignment", danger: true })) return;
+  try { await store.remove("assignments", a.id); all = all.filter(x => x.id !== a.id); render(); toast("Assignment deleted."); }
+  catch { toast("Couldn't delete. Try again.", "err"); }
+});
+render();
+</script>
+</body>
+</html>

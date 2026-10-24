@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assignment</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <section class="card">
+        <div class="list-row" style="padding-top:0">
+          <div><h2 id="title"></h2><p class="sub" style="margin:4px 0 0">Created <span id="created"></span></p></div>
+          <div class="actions noprint"><button class="btn sm" id="allBtn" type="button">Mark all submitted</button><button class="btn sm ghost" id="noneBtn" type="button">Clear all</button></div>
+        </div>
+        <div class="mhead sub"><span>Student</span><span>Status</span><span>Remarks</span></div>
+        <div id="rows"></div>
+      </section>
+      <div class="stickybar">
+        <div class="grow"><span id="count"></span><div class="bar"><i id="barFill" style="width:0"></i></div></div>
+        <a class="btn" href="view.html">Back</a>
+        <button class="btn primary" id="save">Save</button>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { requireAuth, mountShell, store, toast, notFound, esc, param, $ } from "./app.js";
+
+await requireAuth();
+mountShell("assignments", "Assignment");
+const a = await store.get("assignments", param("id"));
+if (!a) await notFound("Assignment not found.", "view.html");
+
+$("#title").textContent = `${a.className} - ${a.title}`;
+$("#created").textContent = a.dateCreated;
+document.title = `${a.title} · ${a.className}`;
+let dirty = false;
+
+function summary() {
+  const s = a.students.filter(x => x.submitted).length, t = a.students.length;
+  $("#count").textContent = `${s} of ${t} submitted`;
+  $("#barFill").style.width = (t ? s / t * 100 : 0) + "%";
+}
+function render() {
+  $("#rows").innerHTML = a.students.length ? a.students.map((s, i) => `
+    <div class="mrow sub ${s.submitted ? "is-on" : ""}" data-i="${i}">
+      <span class="name">${esc(s.name)}</span>
+      <label class="tog"><input type="checkbox" data-f="submitted" ${s.submitted ? "checked" : ""} aria-label="Submitted: ${esc(s.name)}"><span class="n">Missing</span><span class="y">Submitted</span></label>
+      <input type="text" class="full" data-f="remarks" value="${esc(s.remarks || "")}" placeholder="Add remarks…" aria-label="Remarks for ${esc(s.name)}">
+    </div>`).join("") : `<div class="empty">This class has no students.</div>`;
+  summary();
+}
+$("#rows").addEventListener("input", e => {
+  const row = e.target.closest("[data-i]"); if (!row) return;
+  const s = a.students[+row.dataset.i];
+  if (e.target.dataset.f === "submitted") { s.submitted = e.target.checked; row.classList.toggle("is-on", s.submitted); summary(); }
+  else s.remarks = e.target.value;
+  dirty = true;
+});
+$("#allBtn").onclick = () => { a.students.forEach(s => s.submitted = true); dirty = true; render(); };
+$("#noneBtn").onclick = () => { a.students.forEach(s => s.submitted = false); dirty = true; render(); };
+$("#save").onclick = async () => {
+  const b = $("#save"); b.disabled = true;
+  try { await store.save("assignments", a); dirty = false; toast("Saved."); }
+  catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); }
+  b.disabled = false;
+};
+addEventListener("beforeunload", e => { if (dirty) { e.preventDefault(); e.returnValue = ""; } });
+render();
+</script>
+</body>
+</html>

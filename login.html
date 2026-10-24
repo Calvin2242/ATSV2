@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Assignment Tracking System</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="ready">
+<main class="login">
+  <form class="card login-card" id="form">
+    <img src="logo.png" class="login-logo" alt="">
+    <h1>Assignment Tracking System</h1>
+    <p class="sub" style="margin:0">Sign in with the account your school was given.</p>
+    <label class="field"><span>Email</span><input type="email" id="email" autocomplete="username" required></label>
+    <label class="field"><span>Password</span><input type="password" id="password" autocomplete="current-password" required></label>
+    <p class="form-error" id="err" role="alert" hidden></p>
+    <p class="form-ok" id="ok" role="status" hidden></p>
+    <button class="btn primary" id="go">Sign in</button>
+    <button type="button" class="link" id="reset">Forgot your password?</button>
+  </form>
+</main>
+<script type="module">
+import { auth, onAuthStateChanged, signInWithEmailAndPassword, sendPasswordResetEmail, $ } from "./app.js";
+
+onAuthStateChanged(auth, u => { if (u) location.replace("index.html"); });
+
+const err = $("#err"), ok = $("#ok");
+const show = (el, msg) => { err.hidden = ok.hidden = true; el.textContent = msg; el.hidden = false; };
+const MESSAGES = {
+  "auth/invalid-credential": "That email and password don't match. Check them and try again.",
+  "auth/wrong-password": "That email and password don't match. Check them and try again.",
+  "auth/user-not-found": "That email and password don't match. Check them and try again.",
+  "auth/invalid-email": "Enter a valid email address.",
+  "auth/user-disabled": "This account has been disabled. Contact the developer.",
+  "auth/too-many-requests": "Too many attempts. Wait a few minutes, then try again.",
+  "auth/network-request-failed": "Can't reach the server. Check your internet connection."
+};
+
+$("#form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const go = $("#go"); go.disabled = true; go.textContent = "Signing in…";
+  try { await signInWithEmailAndPassword(auth, $("#email").value.trim(), $("#password").value); }
+  catch (x) { show(err, MESSAGES[x.code] || "Couldn't sign in. Try again."); go.disabled = false; go.textContent = "Sign in"; }
+});
+
+$("#reset").addEventListener("click", async () => {
+  const email = $("#email").value.trim();
+  if (!email) return show(err, "Enter your email above, then select “Forgot your password?”.");
+  try { await sendPasswordResetEmail(auth, email); } catch (x) { if (x.code === "auth/invalid-email") return show(err, MESSAGES[x.code]); }
+  show(ok, "If an account exists for that email, a reset link is on its way.");
+});
+</script>
+</body>
+</html>

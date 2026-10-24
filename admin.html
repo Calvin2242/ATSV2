@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>School settings</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <p class="sub">Set the school name and logo shown to each account. New accounts are created by the developer in Firebase and appear here automatically.</p>
+      <div class="cols" id="schools"></div>
+    </main>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <h3>Edit school</h3>
+  <p id="dlgFor"></p>
+  <label class="field"><span>School name</span><input type="text" id="name" maxlength="80"></label>
+  <div class="field" style="margin-top:14px"><span>Logo</span>
+    <div class="school-card">
+      <img class="logo-preview" id="preview" alt="Logo preview">
+      <div class="meta">
+        <input type="file" id="file" accept="image/png,image/jpeg,image/webp,image/svg+xml">
+        <p class="small muted" style="margin:6px 0 0">PNG, JPG, WebP or SVG. Square logos with a transparent or white background look best. It's resized to 256 px automatically.</p>
+        <button class="btn sm ghost" id="removeLogo" type="button" style="margin-top:6px">Use default logo</button>
+      </div>
+    </div>
+  </div>
+  <div class="dlg-actions"><button class="btn ghost" id="cancel" type="button">Cancel</button><button class="btn primary" id="save" type="button">Save changes</button></div>
+</dialog>
+
+<script type="module">
+import { requireAuth, mountShell, toast, resizeImage, db, ctx, collection, doc, getDocs, updateDoc, serverTimestamp, esc, $ } from "./app.js";
+
+await requireAuth({ admin: true });
+mountShell("admin", "School settings");
+
+let users = [], editing = null, newLogo; // newLogo: undefined = unchanged, "" = default, data URL = replaced
+const logoOf = u => u.logo || "logo.png";
+
+async function load() {
+  users = (await getDocs(collection(db, "users"))).docs.map(d => ({ ...d.data(), id: d.id }))
+    .sort((a, b) => (a.schoolName || "").localeCompare(b.schoolName || ""));
+  $("#schools").innerHTML = users.length ? users.map(u => `
+    <div class="card"><div class="school-card"><img src="${esc(logoOf(u))}" alt="">
+      <div class="meta"><b>${esc(u.schoolName || "Unnamed school")}</b><span class="muted small">${esc(u.email || u.id)}</span>
+        ${u.role === "admin" ? `<div style="margin-top:4px"><span class="pill warn">Admin</span></div>` : ""}</div>
+      <button class="btn sm" data-edit="${u.id}">Edit</button></div></div>`).join("")
+    : `<div class="empty">No accounts found.</div>`;
+}
+$("#schools").addEventListener("click", e => {
+  const b = e.target.closest("[data-edit]"); if (!b) return;
+  editing = users.find(u => u.id === b.dataset.edit); newLogo = undefined;
+  $("#dlgFor").textContent = editing.email || editing.id;
+  $("#name").value = editing.schoolName || ""; $("#file").value = "";
+  $("#preview").src = logoOf(editing);
+  $("#dlg").showModal();
+});
+$("#file").onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  try { newLogo = await resizeImage(f); $("#preview").src = newLogo; }
+  catch (x) { toast(x.message, "err"); e.target.value = ""; }
+};
+$("#removeLogo").onclick = () => { newLogo = ""; $("#file").value = ""; $("#preview").src = "logo.png"; };
+$("#cancel").onclick = () => $("#dlg").close();
+$("#save").onclick = async () => {
+  const schoolName = $("#name").value.trim();
+  if (!schoolName) return toast("Enter a school name.", "err");
+  const b = $("#save"); b.disabled = true;
+  try {
+    await updateDoc(doc(db, "users", editing.id), { schoolName, logo: newLogo === undefined ? (editing.logo || "") : newLogo, updatedAt: serverTimestamp() });
+    $("#dlg").close(); toast("School updated.");
+    if (editing.id === ctx.user.uid) return setTimeout(() => location.reload(), 600); // refresh sidebar branding
+    load();
+  } catch (e) { console.error(e); toast("Couldn't save. Check your connection and permissions.", "err"); }
+  b.disabled = false;
+};
+load();
+</script>
+</body>
+</html>

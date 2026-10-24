@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <div id="importBanner"></div>
+      <div class="cols">
+        <section class="card">
+          <div><h2>Take attendance</h2><p class="sub">Open today's register for your class.</p></div>
+          <div class="field"><span>Class</span><div id="headClass"></div></div>
+          <label class="field"><span>Date</span><input type="date" id="date"></label>
+          <label class="check"><input type="checkbox" id="holiday"> Mark this date as a public holiday</label>
+          <button class="btn primary" id="attBtn">Open register</button>
+        </section>
+        <section class="card">
+          <div><h2>New assignment</h2><p class="sub">Track who has handed in their work.</p></div>
+          <div class="field"><span>Class</span>
+            <div class="inline"><select id="classSelect"></select><a class="btn" href="classes.html">New class</a></div>
+          </div>
+          <label class="field"><span>Assignment name</span><input type="text" id="classWork" placeholder="e.g. English Literature W1"></label>
+          <label class="field"><span>Subject</span><input type="text" id="subjectName" placeholder="e.g. Mathematics"></label>
+          <button class="btn primary" id="asgBtn">Create assignment</button>
+        </section>
+      </div>
+      <section class="card">
+        <div class="list-row" style="padding-top:0"><h2>Recent assignments</h2><a class="btn sm" href="view.html">View all</a></div>
+        <div id="recent"></div>
+      </section>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { requireAuth, mountShell, store, toast, confirmBox, esc, uid, today, $,
+         hasLocalData, importLocalData, dismissLocalData } from "./app.js";
+
+await requireAuth();
+mountShell("home", "Home");
+
+let [classes, assignments, settings] = await Promise.all([store.list("classes"), store.list("assignments"), store.settings()]);
+classes.sort((a, b) => a.name.localeCompare(b.name));
+let headClassId = settings.headClassId || "";
+$("#date").value = today();
+
+/* ----- import banner (data saved in this browser by the old version) ----- */
+if (hasLocalData()) {
+  $("#importBanner").innerHTML = `<div class="banner"><div><strong>Data found in this browser</strong><br><span class="small">Copy your old classes, assignments and attendance into your account?</span></div>
+    <div class="actions"><button class="btn primary sm" id="imp">Import now</button><button class="btn ghost sm" id="impNo">Not now</button></div></div>`;
+  $("#imp").onclick = async () => {
+    $("#imp").disabled = true;
+    try { const n = await importLocalData(); toast(`Imported ${n} records.`); setTimeout(() => location.reload(), 900); }
+    catch (e) { console.error(e); toast("Import failed. Nothing was deleted from this browser.", "err"); $("#imp").disabled = false; }
+  };
+  $("#impNo").onclick = () => { dismissLocalData(); $("#importBanner").innerHTML = ""; };
+}
+
+/* ----- attendance class (set once, reused every day) ----- */
+function renderHead() {
+  const box = $("#headClass");
+  if (!classes.length) { box.innerHTML = `<a class="btn" href="classes.html">Create a class first</a>`; return; }
+  const sel = classes.find(c => c.id === headClassId);
+  if (headClassId && !sel) { headClassId = ""; store.setSettings({ headClassId: "" }); }
+  if (!sel) {
+    box.innerHTML = `<div class="inline"><select id="headSel"><option value="">Choose a class…</option>${classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}<option value="new">+ Create new class</option></select><button class="btn" id="headSet">Set</button></div>`;
+    $("#headSet").onclick = async () => {
+      const v = $("#headSel").value;
+      if (v === "new") return location.href = "classes.html";
+      if (!v) return toast("Choose a class first.", "err");
+      headClassId = v; await store.setSettings({ headClassId: v }); renderHead();
+    };
+  } else {
+    box.innerHTML = `<div class="inline"><strong>${esc(sel.name)}</strong><span class="pill">${sel.students.length} students</span><button class="btn sm ghost" id="headChange">Change</button></div>`;
+    $("#headChange").onclick = async () => {
+      if (!await confirmBox({ title: "Change attendance class?", text: "Existing registers stay as they are.", ok: "Change" })) return;
+      headClassId = ""; await store.setSettings({ headClassId: "" }); renderHead();
+    };
+  }
+}
+renderHead();
+
+$("#attBtn").onclick = async () => {
+  const date = $("#date").value, isHoliday = $("#holiday").checked;
+  if (!date) return toast("Choose a date.", "err");
+  if (!headClassId) return toast("Set the attendance class first.", "err");
+  const btn = $("#attBtn"); btn.disabled = true;
+  try {
+    const records = await store.list("attendance");
+    const holidayOnDate = records.find(r => r.date === date && r.isPublicHoliday);
+    if (isHoliday) {
+      if (records.some(r => r.date === date && !r.isPublicHoliday)) return toast("Can't mark a public holiday: attendance already exists for this date.", "err");
+      if (holidayOnDate) return toast("This date is already a public holiday.", "err");
+      await store.save("attendance", { id: uid("hol"), date, isPublicHoliday: true });
+      $("#holiday").checked = false;
+      return toast("Public holiday saved.");
+    }
+    if (holidayOnDate) return toast("This date is a public holiday. Delete the holiday first to take attendance.", "err");
+    const existing = records.find(r => r.classId === headClassId && r.date === date);
+    if (existing) {
+      if (await confirmBox({ title: "Register already exists", text: "Attendance for this class on this date was already created. Open it to edit?", ok: "Open register" }))
+        location.href = `attendance.html?id=${existing.id}`;
+      return;
+    }
+    const cls = classes.find(c => c.id === headClassId);
+    const rec = { id: uid("att"), classId: cls.id, className: cls.name, date, isPublicHoliday: false,
+      students: cls.students.map(name => ({ name, present: false, leftEarly: false, reason: "" })) };
+    await store.save("attendance", rec);
+    location.href = `attendance.html?id=${rec.id}`;
+  } catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); }
+  finally { btn.disabled = false; }
+};
+
+/* ----- new assignment ----- */
+$("#classSelect").innerHTML = classes.length
+  ? classes.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")
+  : `<option value="">No classes yet</option>`;
+
+$("#asgBtn").onclick = async () => {
+  const cls = classes.find(c => c.id === $("#classSelect").value);
+  const title = $("#classWork").value.trim(), subject = $("#subjectName").value.trim();
+  if (!cls || !title || !subject) return toast("Choose a class and fill in the name and subject.", "err");
+  const btn = $("#asgBtn"); btn.disabled = true;
+  const a = { id: uid("a"), classId: cls.id, className: cls.name, title, subject,
+    dateCreated: new Date().toLocaleDateString(), createdAt: Date.now(),
+    students: cls.students.map(name => ({ name, submitted: false, remarks: "" })) };
+  try { await store.save("assignments", a); location.href = `assignment.html?id=${a.id}`; }
+  catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); btn.disabled = false; }
+};
+
+/* ----- recent assignments ----- */
+const recent = [...assignments].sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0) || b.id.localeCompare(a.id)).slice(0, 5);
+$("#recent").innerHTML = recent.length ? recent.map(a => {
+  const s = a.students.filter(x => x.submitted).length, t = a.students.length, p = t ? Math.round(s / t * 100) : 0;
+  return `<div class="list-row"><div><strong>${esc(a.title)}</strong><div class="muted small">${esc(a.className)} · ${esc(a.subject)}</div></div>
+    <div class="prog" style="min-width:160px"><span>${s}/${t} submitted (${p}%)</span><div class="bar"><i style="width:${p}%"></i></div></div>
+    <a class="btn sm" href="assignment.html?id=${a.id}">Open</a></div>`;
+}).join("") : `<div class="empty">No assignments yet. Create one above to start tracking submissions.</div>`;
+</script>
+</body>
+</html>

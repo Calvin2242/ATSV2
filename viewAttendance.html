@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attendance records</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <section class="card">
+        <div class="inline" style="margin-bottom:12px">
+          <input type="search" id="search" placeholder="Search by date, e.g. 2026-03" aria-label="Search by date">
+          <label class="check"><input type="checkbox" id="showHol" checked> Show public holidays</label>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead><tr><th>Date</th><th>Class</th><th>Present</th><th>Actions</th></tr></thead>
+            <tbody id="rows"></tbody>
+          </table>
+        </div>
+        <div class="dlg-actions" style="justify-content:flex-start"><button class="btn danger" id="clearAll">Clear all attendance data</button></div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<dialog id="reportDlg">
+  <h3>Parent weekly report</h3>
+  <p id="reportFor"></p>
+  <label class="check"><input type="checkbox" id="selAll" checked> Select all students</label>
+  <div class="scroll-list" id="studentList"></div>
+  <div class="dlg-actions">
+    <button class="btn ghost" id="rCancel" type="button">Cancel</button>
+    <button class="btn" id="rZip" type="button">Download all as ZIP</button>
+    <button class="btn primary" id="rSel" type="button">Download selected</button>
+  </div>
+</dialog>
+
+<script type="module">
+import { requireAuth, mountShell, store, toast, confirmBox, logoForPdf, ctx, esc, today, $, $$ } from "./app.js";
+
+await requireAuth();
+mountShell("attendance", "Attendance records");
+
+let records = await store.list("attendance");
+let current = null; // record chosen for the parent report
+
+/* ---------- table ---------- */
+function render() {
+  const q = $("#search").value.trim(), showHol = $("#showHol").checked;
+  const list = records.filter(r => r.date.includes(q)).filter(r => showHol || !r.isPublicHoliday)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  $("#rows").innerHTML = list.length ? list.map(r => r.isPublicHoliday
+    ? `<tr class="hol"><td><strong>${esc(r.date)}</strong></td><td><span class="pill">Public holiday</span></td><td>—</td><td><button class="btn sm danger" data-del="${r.id}">Delete holiday</button></td></tr>`
+    : `<tr><td>${esc(r.date)}</td><td>${esc(r.className)}</td><td>${r.students.filter(s => s.present).length}/${r.students.length}</td>
+       <td><div class="actions"><a class="btn sm" href="attendance.html?id=${r.id}">Edit</a><button class="btn sm" data-rep="${r.id}">Parent weekly report</button><button class="btn sm danger" data-del="${r.id}">Delete</button></div></td></tr>`
+  ).join("") : `<tr><td colspan="4"><div class="empty">${records.length ? "No records match your search." : "No attendance recorded yet.<br><a class='btn primary' href='index.html'>Take attendance</a>"}</div></td></tr>`;
+}
+$("#search").addEventListener("input", render);
+$("#showHol").addEventListener("change", render);
+$("#rows").addEventListener("click", async e => {
+  const del = e.target.closest("[data-del]"), rep = e.target.closest("[data-rep]");
+  if (rep) return openReport(rep.dataset.rep);
+  if (!del) return;
+  const r = records.find(x => x.id === del.dataset.del);
+  if (!await confirmBox({ title: r.isPublicHoliday ? "Delete this holiday?" : "Delete this record?", text: r.isPublicHoliday ? r.date : `${r.className} on ${r.date}`, ok: "Delete", danger: true })) return;
+  try { await store.remove("attendance", r.id); records = records.filter(x => x.id !== r.id); render(); toast("Deleted."); }
+  catch { toast("Couldn't delete. Try again.", "err"); }
+});
+$("#clearAll").onclick = async () => {
+  if (!await confirmBox({ title: "Clear all attendance data?", text: "This deletes every attendance record and public holiday. It can't be undone.", ok: "Clear everything", danger: true })) return;
+  try { await store.clear("attendance"); records = []; render(); toast("All attendance data cleared."); }
+  catch { toast("Couldn't clear data. Try again.", "err"); }
+};
+
+/* ---------- parent weekly report ---------- */
+function openReport(id) {
+  current = records.find(r => r.id === id);
+  $("#reportFor").textContent = `${current.className}, week of ${current.date}`;
+  $("#studentList").innerHTML = current.students.map((s, i) =>
+    `<label class="check"><input type="checkbox" value="${i}" checked> ${esc(s.name)}</label>`).join("");
+  $("#selAll").checked = true;
+  $("#reportDlg").showModal();
+}
+$("#selAll").onchange = e => $$("#studentList input").forEach(c => c.checked = e.target.checked);
+$("#rCancel").onclick = () => $("#reportDlg").close();
+
+// Mon–Fri of the record's week; counts school days that have passed, minus public holidays.
+function weekStats(record) {
+  const d = new Date(record.date + "T00:00:00Z"), dow = d.getUTCDay();
+  const start = new Date(d); start.setUTCDate(d.getUTCDate() + (dow === 0 ? -6 : 1 - dow));
+  const weekDates = [0, 1, 2, 3, 4].map(i => { const x = new Date(start); x.setUTCDate(start.getUTCDate() + i); return x.toISOString().slice(0, 10); });
+  const passed = weekDates.filter(x => x <= today());
+  const holidays = records.filter(r => r.isPublicHoliday && passed.includes(r.date)).length;
+  const weekRecords = records.filter(r => !r.isPublicHoliday && r.classId === record.classId && r.date >= weekDates[0] && r.date <= weekDates[4]);
+  return { startStr: weekDates[0], endStr: weekDates[4], weekRecords, totalDays: Math.max(0, passed.length - holidays) };
+}
+const fmtDate = s => new Date(s + "T00:00:00Z").toLocaleDateString("en-GB", { day: "numeric", month: "short", timeZone: "UTC" });
+
+function buildPdf(studentName, stats, logo) {
+  const { jsPDF } = window.jspdf, doc = new jsPDF(), cx = 105;
+  let present = 0;
+  stats.weekRecords.forEach(r => { const s = r.students.find(x => x.name === studentName); if (s && s.present) present++; });
+  const absent = stats.totalDays - present;
+  const pct = stats.totalDays === 0 ? 0 : (present / stats.totalDays * 100).toFixed(1);
+  const color = pct < 80 ? [200, 30, 30] : pct < 90 ? [220, 140, 0] : [0, 128, 0];
+
+  doc.setLineWidth(0.5); doc.rect(10, 10, 190, 277);
+  if (logo) { // fit inside a 30×30 box, keep aspect ratio
+    const k = Math.min(30 / logo.w, 30 / logo.h), w = logo.w * k, h = logo.h * k;
+    try { doc.addImage(logo.data, logo.fmt, cx - w / 2, 15 + (30 - h) / 2, w, h); } catch {}
+  }
+  doc.setTextColor(0, 0, 0);
+  doc.setFont("helvetica", "bold"); doc.setFontSize(13);
+  doc.text(ctx.profile.schoolName, cx, 52, { align: "center" });
+  doc.setFontSize(18); doc.text("WEEKLY ATTENDANCE REPORT", cx, 62, { align: "center" });
+  doc.line(30, 67, 180, 67);
+  doc.setFontSize(15); doc.text(studentName, cx, 80, { align: "center" });
+  doc.setFontSize(12); doc.text(`from ${current.className}`, cx, 88, { align: "center" });
+  const end = stats.endStr > today() ? today() : stats.endStr;
+  doc.text(`${fmtDate(stats.startStr)} — ${fmtDate(end)} ${new Date(stats.endStr + "T00:00:00Z").getUTCFullYear()}`, cx, 96, { align: "center" });
+  doc.line(60, 101, 150, 101);
+  doc.setFontSize(14);
+  doc.text(`Days Present: ${present} / ${stats.totalDays}`, cx, 118, { align: "center" });
+  doc.text(`Days Absent: ${absent}`, cx, 128, { align: "center" });
+  doc.setTextColor(...color); doc.setFontSize(24); doc.text(`${pct}%`, cx, 153, { align: "center" });
+  doc.setFontSize(10); doc.text("Attendance Percentage", cx, 161, { align: "center" });
+  doc.setTextColor(150, 150, 150); doc.setFont("helvetica", "italic"); doc.setFontSize(9);
+  doc.text("This is an electronically generated report, hence does not require signature.", cx, 280, { align: "center" });
+  return doc;
+}
+const safeName = n => n.replace(/[\\/:*?"<>|]+/g, "-");
+
+$("#rSel").onclick = async () => {
+  const picked = $$("#studentList input:checked").map(c => current.students[+c.value].name);
+  if (!picked.length) return toast("Select at least one student.", "err");
+  const stats = weekStats(current), logo = await logoForPdf();
+  $("#reportDlg").close();
+  for (const name of picked) { buildPdf(name, stats, logo).save(`Weekly_Report_${safeName(name)}.pdf`); await new Promise(r => setTimeout(r, 500)); }
+};
+$("#rZip").onclick = async () => {
+  const stats = weekStats(current), logo = await logoForPdf(), zip = new JSZip();
+  current.students.forEach(s => zip.file(`Weekly_Report_${safeName(s.name)}.pdf`, buildPdf(s.name, stats, logo).output("arraybuffer")));
+  const blob = await zip.generateAsync({ type: "blob" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `Attendance_Reports_${stats.startStr}.zip`; a.click();
+  $("#reportDlg").close();
+};
+
+render();
+</script>
+</body>
+</html>

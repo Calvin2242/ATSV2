@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Assignment report</title>
+<script>document.documentElement.dataset.theme=localStorage.getItem('theme')||(matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light')</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;700&family=Figtree:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="app">
+  <aside class="side" id="side"></aside>
+  <div class="content">
+    <header class="top" id="top"></header>
+    <main class="page">
+      <section class="card" id="report"></section>
+      <div class="actions noprint">
+        <button class="btn primary" id="pdf">Export as PDF</button>
+        <a class="btn" href="view.html">Back</a>
+      </div>
+    </main>
+  </div>
+</div>
+<script type="module">
+import { requireAuth, mountShell, store, notFound, ctx, logoSrc, esc, param, $ } from "./app.js";
+
+await requireAuth();
+mountShell("assignments", "Assignment report");
+const a = await store.get("assignments", param("id"));
+if (!a) await notFound("Assignment not found.", "view.html");
+
+const yes = a.students.filter(s => s.submitted), no = a.students.filter(s => !s.submitted);
+const total = a.students.length, pct = total ? Math.round(yes.length / total * 100) : 0;
+const list = arr => arr.length ? `<ul class="plain-list">${arr.map(s => `<li>${esc(s.name)}${s.remarks ? ` <span class="muted">(${esc(s.remarks)})</span>` : ""}</li>`).join("")}</ul>` : `<p class="muted">None</p>`;
+
+$("#report").innerHTML = `
+  <div class="report-head"><img src="${esc(logoSrc(ctx.profile))}" alt=""><div><strong>${esc(ctx.profile.schoolName)}</strong><h2>${esc(a.className)} - ${esc(a.title)}</h2></div></div>
+  <p><strong>Subject:</strong> ${esc(a.subject)}<br><strong>Date created:</strong> ${esc(a.dateCreated)}</p>
+  <div class="prog" style="margin:16px 0 20px"><span>${yes.length} of ${total} students submitted (${pct}%)</span><div class="bar"><i style="width:${pct}%"></i></div></div>
+  <div class="two-col">
+    <div><h3>Submitted (${yes.length})</h3>${list(yes)}</div>
+    <div><h3>Not submitted (${no.length})</h3>${list(no)}</div>
+  </div>`;
+
+$("#pdf").onclick = () => {
+  const t = document.title; document.title = `${a.className} - ${a.title} Report`;
+  print(); document.title = t;
+};
+</script>
+</body>
+</html>
