@@ -113,7 +113,7 @@ $("#attBtn").onclick = async () => {
     }
     const cls = classes.find(c => c.id === headClassId);
     const rec = { id: uid("att"), classId: cls.id, className: cls.name, date, isPublicHoliday: false,
-      students: cls.students.map(name => ({ name, present: false, leftEarly: false, reason: "" })) };
+      students: cls.students.map(name => ({ name, present: false, reason: "" })) };
     await store.save("attendance", rec);
     location.href = `attendance.html?id=${rec.id}`;
   } catch (e) { console.error(e); toast("Couldn't save. Check your connection.", "err"); }
@@ -148,3 +148,4 @@ $("#recent").innerHTML = recent.length ? recent.map(a => {
 </script>
 </body>
 </html>
+  

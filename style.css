@@ -16,6 +16,7 @@ html { color-scheme: light; }
 [data-theme="dark"] { color-scheme: dark; }
 body { margin: 0; font: 400 15px/1.5 Figtree, system-ui, sans-serif; background: var(--bg); color: var(--ink); }
 h1, h2, h3 { font-family: "Bricolage Grotesque", Figtree, system-ui, sans-serif; margin: 0; line-height: 1.15; letter-spacing: -0.01em; }
+[hidden] { display: none !important; }
 a { color: var(--accent); }
 .muted { color: var(--muted); } .small { font-size: 13px; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -105,7 +106,7 @@ tr.hol td { background: var(--accent-soft); }
 /* ---------- marking rows (attendance + submissions) ---------- */
 .mhead, .mrow { display: grid; gap: 16px; align-items: center; padding: 10px 4px; border-bottom: 1px solid var(--line); }
 .mhead { color: var(--muted); font-size: 13px; font-weight: 600; }
-.mrow.att, .mhead.att { grid-template-columns: minmax(140px, 1.4fr) auto auto minmax(160px, 1.6fr); }
+.mrow.att, .mhead.att { grid-template-columns: minmax(140px, 1.4fr) auto minmax(180px, 2fr); }
 .mrow.sub, .mhead.sub { grid-template-columns: minmax(140px, 1.4fr) auto minmax(180px, 2fr); }
 .mrow .name { font-weight: 600; }
 .mrow.is-on .name { color: var(--accent); }
@@ -122,7 +123,6 @@ tr.hol td { background: var(--accent-soft); }
 @media (max-width: 700px) {
   .mhead { display: none; }
   .mrow.att, .mrow.sub { grid-template-columns: 1fr auto; }
-  .mrow.att .tog:nth-of-type(2) { grid-column: 1; justify-self: start; }
   .mrow .full { grid-column: 1 / -1; }
 }
 
